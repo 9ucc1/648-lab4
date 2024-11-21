@@ -9,22 +9,126 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+library(tidytext)
+library(textdata)
+library(tidyverse)
 ```
 
-## Including Plots
+I am choosing to perform a sentiment analysis on an album entitled "The Head Hurts but the Heart Knows the Truth" by musical artist Headache, released in May 2023. The genre is dance/electronic but the lyrics are spoken text narrating a long, rambling, somewhat confusing stream of consciousness of an individual reflecting on their life, love, and loneliness. To me (a human), it sounds very unsettling, perhaps sad, but definitely negative. Online, there has been discourse about the origin of the lyrics - some people think they were generated and/or performed by AI.
 
-You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+headache_raw <- read.csv("headache-album.csv")
+nrc_sentiments <- get_sentiments("nrc")
+unique_sentiments <- unique(nrc_sentiments$sentiment)
+print(unique_sentiments)
+```
+I loaded the album lyrics into a CSV file line by line for each track, and am reading them in here. I am using the NRC sentiment analysis to analyze with multiple sentiment/feeling types.
+
+```{r}
+library(stringr)
+headache_raw$lyric <- as.character(headache_raw$lyric)
+
+tidy_song <- headache_raw %>%
+  group_by(track_title) %>%
+  ungroup() %>%
+  unnest_tokens(word,lyric)
+
+head(tidy_song)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+I am splitting each line of lyric into individual words while keeping track of what track they belong to.
+
+```{r}
+headache_with_sentiment <- tidy_song %>% left_join(nrc_sentiments, by="word", relationship="many-to-many")
+headache_sentiment_filtered <- headache_with_sentiment %>% filter(!is.na(sentiment))
+print(headache_sentiment_filtered)
+```
+
+Now I am doing a left join with nrc sentiments to apply sentiments, where available, to the lyrics. However, a lot of the words return as NA because no sentiment is found, so I dropped the NA words. Also, I decided to allow a many to many relationship to encompass all of the available sentiments - sometimes a single word has multiple associated sentiments. For example the word "good" can be anticipation, joy, positive, surprise, and trust. 
+
+```{r}
+
+```
+
+```{r}
+sentiment_counts <- headache_sentiment_filtered %>%
+   count(track_title, sentiment) #%>%
+  # complete(track_title, sentiment, fill = list(n = 0)) 
+
+sentiment_counts <- sentiment_counts %>%
+  group_by(track_title) %>%
+  mutate(percentage = n / sum(n),
+         label = scales::percent(percentage, accuracy = 1)) %>%
+  ungroup()
+
+# ggplot(sentiment_counts, aes("", n, fill = sentiment)) +
+#   geom_bar(stat = "identity", width = 1) +
+#     geom_text(aes(label = label), 
+#             position = position_stack(vjust = 0.5),
+#             size = 3) +
+#   coord_polar("y") +
+#   facet_wrap(~ track_title) +
+#   labs(title = "Sentiment Distribution per Song",
+#        fill = "Sentiment") +
+#   theme_void()
+
+# ggplot(sentiment_counts, aes("", n, fill = sentiment)) +
+#   geom_bar(stat = "identity", width = 1) +
+#   geom_text(aes(label = ifelse(percentage > 0.05, label, "")), 
+#             position = position_stack(vjust = 0.5),
+#             size = 3) +
+#   coord_polar("y") +
+#   facet_wrap(~ track_title) +
+#   labs(title = "Sentiment Distribution per Song",
+#        fill = "Sentiment") +
+#   theme_void()
+
+ggplot(sentiment_counts, aes(x = sentiment, y = n, fill = sentiment)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ track_title, scales = "free_y") +
+  labs(title = "Sentiment Distribution per Song",
+       x = "Sentiment",
+       y = "Percentage",
+       fill = "Sentiment") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+
+```
+
+```{r}
+ggplot(sentiment_counts, aes(x = sentiment, y = n, fill = sentiment)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  #facet_wrap(~ track_title, scales = "free_y") +
+  labs(title = "Sentiment Distribution over Entire Album",
+       x = "Sentiment",
+       y = "Percentage",
+       fill = "Sentiment") +
+  theme_minimal()
+```
+
+From looking at these distributions for both the individual song and the overall album, it was somewhat surprising that the negative-type sentiments of anger, disgust, fear, and sadness were actually lowest overall. Baseline positive and negative words, as well as words associated with trust, anticipation, and joy were comparatively higher.
+
+Now I am reproducing these visualizations with afinn.
+
+```{r}
+afinn_sentiments <- get_sentiments("afinn")
+headache_sentiment_afinn <- tidy_song %>% left_join(afinn_sentiments, by="word") %>% filter(!is.na(value))
+head(headache_sentiment_afinn)
+```
+
+```{r}
+ggplot(headache_sentiment_afinn, aes(line, value, fill = track_title)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~track_title)
+```
+
+From the statement analysis with the afinn lexicon assigning negative and positive numbers to words, there is a slight bit of negative trending especially in the song "The Beginning of the End". However, overall there is not a strong trend towards either positive or negative sentiment in any of the songs. This is interesting because it shows that just based on words in their raw state, not considering context, this set of words has a somewhat neutral distribution of sentiment.
+
+I asked ChatGPT to perform a sentiment analysis on the album next. I experimented with asking it to use the sentiment lexicons (it gave me a tutorial of how to reproduce the methods in this lab), versus asking for "meanings" and "themes". This paragraph of its explanation resonated most:
+
+"The album carries a nonlinear narrative structure, presenting fragmented introspections about love, loss, and resilience. Tracks like "Business Opportunities" highlight dark, visceral moments, including a failed suicide attempt, juxtaposed with uplifting segments in later songs like "Truisms 4 Dummies," suggesting a shift toward optimism. Central to the album is the idea that "love is the only thought and pain is the only feeling," but this overarching theme invites debate due to its absolutist perspective. The AI voice adds a haunting, otherworldly quality, amplifying the album's emotional tension and innovation."
+
+I think this does a good job of summarizing the surface sentiment of the songs, as it is able to take into context the meaning of the lyrics instead of just analyzing each word. It's probably also subjective how sentiment is perceived and there isn't a "correct" analysis - one person or AI's impression could be different than another.
+
